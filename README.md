@@ -1,154 +1,150 @@
 # simplify_urdf_collision
 
-This git provides a script to simplify URDF collision models with optimal bounding boxes.
+Replace mesh-based URDF collision geometries with simple bounding primitives
+(box, sphere, cylinder). The tool automatically picks the best primitive per
+link, or you can force a specific type globally or per-link via a YAML config.
 
-Installation
-------------
+## Quick start
 
-you can install this as a catikin package or just run the script.
+The project uses [pixi](https://pixi.sh/) to manage a fully isolated Python
+environment -- nothing is installed system-wide.
 
-Python Dependencies (install using pip):
-  - transforms3d
-  - trimesh
-  - numpy
-  - pyyaml
-  - scipy
-  - lxml
-
-You need to install urdf-parser-py manually since the pip package is not maintained:
-
-```
-git clone git@github.com:ros/urdf_parser_py.git
-cd urdf_parser_py
-pip install .
-```
-depending on your pip configuration you may need to use the `--user` option.
-
-
-
-Run and usage
--------------
-
-Run the script with -h to get the usage options.
-
-```python src/simplify_urdf_collision/simplify.py -h```
-
--------------
-
-# Use example on Unitree G1 humanoid:
 ```bash
-python src/simplify_urdf_collision/simplify.py g1_29dof_with_hand_rev_1_0.urdf g1_29dof_with_hand_rev_1_0_simplified.urdf --scale 0.77 --verbose --bbox-type obb --tight-fit
+# Install the environment (one-time)
+pixi install
+
+# Run the simplifier (pixi sets PYTHONPATH automatically)
+pixi run simplify input.urdf output.urdf [options]
 ```
 
-After this, some manual adjustions might still be needed.
+If you prefer running Python directly:
 
-![The converted USD file for G1 humanoid](g1_29dof_with_hand_simplified_colliion.png)
-
-# Enhanced Collision Simplification Usage Examples
-
-The improved `simplify.py` script now provides much better control over bounding box fitting. Here are some common usage patterns:
-
-## Basic Usage (same as before)
 ```bash
-python simplify.py input.urdf output.urdf
+PYTHONPATH=src pixi run python -m simplify_urdf_collision.simplify input.urdf output.urdf
 ```
 
-## Scaling Examples
+## Usage
 
-### Make boxes 10% larger in all dimensions
+```
+pixi run simplify -h
+```
+
+### Basic examples
+
 ```bash
-python simplify.py input.urdf output.urdf --scale 1.1
+# Auto-detect best primitive per link (default)
+pixi run simplify input.urdf output.urdf
+
+# Force all collisions to boxes (original behavior)
+pixi run simplify input.urdf output.urdf --primitive-type box
+
+# Use oriented bounding boxes with tight fitting
+pixi run simplify input.urdf output.urdf --primitive-type box --bbox-type obb --tight-fit
+
+# Verbose output
+pixi run simplify input.urdf output.urdf --verbose
 ```
 
-### Make boxes narrower in X direction, taller in Z direction
+### Unitree G1 humanoid example
+
 ```bash
-python simplify.py input.urdf output.urdf --scale-x 0.8 --scale-z 1.2
+pixi run simplify g1_29dof_with_hand_rev_1_0.urdf g1_simplified.urdf \
+    --scale 0.77 --verbose --bbox-type obb --tight-fit
 ```
 
-## Padding Examples
+![Simplified collision for G1 humanoid](g1_29dof_with_hand_simplified_colliion.png)
 
-### Add 1cm padding to all dimensions
+## Primitive types
+
+| Flag | Description |
+|------|-------------|
+| `--primitive-type auto` | (default) Automatically picks box, sphere, or cylinder per link |
+| `--primitive-type box` | Bounding box for every link (original behavior) |
+| `--primitive-type sphere` | Bounding sphere for every link |
+| `--primitive-type cylinder` | Bounding cylinder for every link |
+
+The auto-detection analyses each mesh's aspect ratios, sphericity, and
+cross-section circularity to pick the tightest-fitting primitive.
+
+## Scaling and padding
+
 ```bash
-python simplify.py input.urdf output.urdf --padding 0.01
+# Uniform 10% larger
+pixi run simplify input.urdf output.urdf --scale 1.1
+
+# Per-axis scaling
+pixi run simplify input.urdf output.urdf --scale-x 0.8 --scale-z 1.2
+
+# Add 1 cm padding everywhere
+pixi run simplify input.urdf output.urdf --padding 0.01
+
+# Per-axis padding
+pixi run simplify input.urdf output.urdf --padding-x 0.005 --padding-z 0.02
 ```
 
-### Add different padding per axis (useful for elongated objects)
+## Per-link YAML config
+
+For fine-grained control, pass `--config config.yaml`. This lets you set
+defaults and per-link overrides so you can tune once and re-run
+deterministically instead of editing the output URDF by hand.
+
+```yaml
+defaults:
+  primitive_type: auto
+  scale: 1.1
+  padding: 0.005
+
+overrides:
+  pelvis_contour_link:
+    primitive_type: box
+    scale: 1.2
+  left_knee_link:
+    primitive_type: cylinder
+    padding: 0.01
+  head_link:
+    primitive_type: sphere
+```
+
+Supported per-link keys: `primitive_type`, `bbox_type`, `scale`, `scale_x`,
+`scale_y`, `scale_z`, `padding`, `padding_x`, `padding_y`, `padding_z`,
+`min_size`, `tight_fit`.
+
 ```bash
-python simplify.py input.urdf output.urdf --padding-x 0.005 --padding-y 0.005 --padding-z 0.02
+pixi run simplify input.urdf output.urdf --config config.yaml --verbose
 ```
 
-## Bounding Box Type Examples
+## All CLI options
 
-### Use axis-aligned bounding boxes (simpler, but often larger)
-```bash
-python simplify.py input.urdf output.urdf --bbox-type aabb
-```
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--primitive-type` | `auto` | Primitive type: `auto`, `box`, `sphere`, `cylinder` |
+| `--config` | — | YAML config file with per-link overrides |
+| `--scale` | `1.0` | Uniform scaling factor |
+| `--scale-x/y/z` | — | Per-axis scaling (overrides `--scale`) |
+| `--padding` | `0.0` | Uniform padding in meters |
+| `--padding-x/y/z` | — | Per-axis padding in meters |
+| `--bbox-type` | `obb` | `obb` (oriented) or `aabb` (axis-aligned) |
+| `--tight-fit` | off | Use convex hull for tighter fitting |
+| `--min-size` | `0.001` | Minimum dimension in meters |
+| `-e`, `--exclude` | — | Link names to skip |
+| `-s`, `--select` | off | Interactive mode to deselect links |
+| `-r`, `--ros` | off | Resolve `package://` paths |
+| `-v`, `--verbose` | off | Print per-link details |
 
-### Use oriented bounding boxes with tight fitting (default, usually better)
-```bash
-python simplify.py input.urdf output.urdf --bbox-type obb --tight-fit
-```
+## Tips
 
-## Combined Examples
+1. **Start with `--primitive-type auto`** -- it picks the right shape for most links.
+2. **Use `--config`** for repeatable per-link tuning instead of hand-editing the URDF.
+3. **For robot hands/grippers**: small scaling (1.05-1.1) with small padding.
+4. **For safe collision checking**: larger scaling (1.2-1.5) with generous padding.
+5. **Always use `--verbose`** when iterating to see what primitive and dimensions each link gets.
 
-### Conservative approximation: 20% larger boxes with 5mm padding
-```bash
-python simplify.py input.urdf output.urdf --scale 1.2 --padding 0.005
-```
+## Legacy notes
 
-### Tight approximation for precision applications
-```bash
-python simplify.py input.urdf output.urdf --tight-fit --scale 1.05 --min-size 0.0005
-```
+The repo still contains `CMakeLists.txt`, `package.xml`, `setup.py`, and
+`src/optimal_bounding_box.cpp` from the original ROS/catkin packaging. These
+are not used by the pixi-based workflow and can be safely ignored or removed.
 
-### Custom per-axis scaling for hand/gripper models
-```bash
-python simplify.py input.urdf output.urdf --scale-x 1.1 --scale-y 1.1 --scale-z 0.9 --padding 0.002
-```
+## License
 
-## Debugging and Analysis
-
-### Verbose output to see volume ratios and detailed info
-```bash
-python simplify.py input.urdf output.urdf --verbose
-```
-
-### Interactive mode to selectively process collision models
-```bash
-python simplify.py input.urdf output.urdf --select --verbose
-```
-
-### Exclude specific links from processing
-```bash
-python simplify.py input.urdf output.urdf --exclude base_link sensor_link
-```
-
-## ROS Integration
-
-### Process ROS package URDFs with enhanced control
-```bash
-python simplify.py input.urdf output.urdf --ros --scale 1.1 --padding 0.01
-```
-
-## Understanding the Parameters
-
-- **`--scale`**: Uniform scaling factor for all dimensions (1.0 = original size)
-- **`--scale-x/y/z`**: Per-axis scaling (overrides uniform scale)
-- **`--padding`**: Uniform padding in meters added to all dimensions
-- **`--padding-x/y/z`**: Per-axis padding in meters (overrides uniform padding)
-- **`--bbox-type`**: 
-  - `obb` (default): Oriented bounding box - rotated to fit shape better
-  - `aabb`: Axis-aligned bounding box - simpler but often larger
-- **`--tight-fit`**: Use convex hull for potentially tighter fitting
-- **`--min-size`**: Minimum dimension size (prevents degenerate boxes)
-- **`--verbose`**: Show detailed information including volume ratios
-
-## Tips for Better Results
-
-1. **For robot hands/grippers**: Use smaller scaling (1.05-1.1) with small padding
-2. **For safe collision checking**: Use larger scaling (1.2-1.5) with generous padding  
-3. **For visualization/display**: Tight fit with minimal scaling works well
-4. **For complex shapes**: Try `--tight-fit` option for better approximation
-5. **For debugging**: Always use `--verbose` to see volume ratios and understand fit quality
-
-The volume ratio shown in verbose mode indicates how much larger the bounding box is compared to the original mesh volume. Lower ratios (closer to 1.0) indicate tighter fits.
+MIT -- see [LICENSE](LICENSE).

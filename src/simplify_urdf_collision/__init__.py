@@ -1,1 +1,1 @@
-from simplify_urdf_collision.py_optimal_bounding_box import create_optimal_bounding_box 
+"""URDF collision model simplifier — replaces mesh geometries with bounding primitives."""

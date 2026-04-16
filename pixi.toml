@@ -1,0 +1,21 @@
+[workspace]
+name = "simplify-urdf-collision"
+version = "0.2.0"
+description = "Simplify URDF collision models with optimal bounding primitives (box, sphere, cylinder)"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.11"
+
+[pypi-dependencies]
+trimesh = "*"
+numpy = "*"
+transforms3d = "*"
+scipy = "*"
+lxml = "*"
+pyyaml = "*"
+urdf-parser-py = "*"
+
+[tasks]
+simplify = { cmd = "python -m simplify_urdf_collision.simplify", env = { PYTHONPATH = "src" } }
