@@ -36,7 +36,7 @@ def _load_config(path: str | None) -> dict:
           scale: 1.1
           padding: 0.005
           bbox_type: obb
-          tight_fit: false
+          tight_fit: true
 
         overrides:
           left_hip_pitch_link:
@@ -85,7 +85,7 @@ def _link_params(config: dict, link_name: str, cli_args: argparse.Namespace) -> 
 
 
 # ---------------------------------------------------------------------------
-# Bounding box (existing logic, cleaned up)
+# Bounding box
 # ---------------------------------------------------------------------------
 
 def calculate_bounding_box(
@@ -100,7 +100,7 @@ def calculate_bounding_box(
     padding_y: float | None = None,
     padding_z: float | None = None,
     min_size: float = 0.001,
-    tight_fit: bool = False,
+    tight_fit: bool = True,
 ):
     """Calculate bounding box dimensions and transformation for a mesh.
 
@@ -108,20 +108,15 @@ def calculate_bounding_box(
         (bb_size, bb_tf): list of 3 floats and a 4x4 numpy array.
     """
     if bbox_type == "obb":
+        fit_mesh = mesh
         if tight_fit:
             try:
-                convex_mesh = mesh.convex_hull
-                bb_tf = np.linalg.inv(np.asarray(convex_mesh.apply_obb()))
-                bb_bounds = convex_mesh.bounding_box_oriented.bounds
-                bb_size = [bb_bounds[1][0] * 2, bb_bounds[1][1] * 2, bb_bounds[1][2] * 2]
-            except (ValueError, RuntimeError, np.linalg.LinAlgError):
-                bb_tf = np.linalg.inv(np.asarray(mesh.apply_obb()))
-                bb_bounds = mesh.bounding_box_oriented.bounds
-                bb_size = [bb_bounds[1][0] * 2, bb_bounds[1][1] * 2, bb_bounds[1][2] * 2]
-        else:
-            bb_tf = np.linalg.inv(np.asarray(mesh.apply_obb()))
-            bb_bounds = mesh.bounding_box_oriented.bounds
-            bb_size = [bb_bounds[1][0] * 2, bb_bounds[1][1] * 2, bb_bounds[1][2] * 2]
+                fit_mesh = mesh.convex_hull
+            except (ValueError, RuntimeError):
+                pass
+        bb_tf = np.linalg.inv(np.asarray(fit_mesh.apply_obb()))
+        bb_bounds = fit_mesh.bounding_box_oriented.bounds
+        bb_size = [bb_bounds[1][0] * 2, bb_bounds[1][1] * 2, bb_bounds[1][2] * 2]
     else:  # aabb
         if tight_fit:
             try:
@@ -159,7 +154,7 @@ def calculate_bounding_box(
 # Unified primitive fitting
 # ---------------------------------------------------------------------------
 
-def fit_primitive(mesh: trimesh.Trimesh, params: dict):
+def fit_primitive(mesh: trimesh.Trimesh, params: dict, link_name: str | None = None):
     """Fit a collision primitive to *mesh* according to *params*.
 
     Returns:
@@ -167,34 +162,30 @@ def fit_primitive(mesh: trimesh.Trimesh, params: dict):
     """
     ptype = params["primitive_type"]
     if ptype == "auto":
-        ptype = detect_best_primitive(mesh)
+        ptype = detect_best_primitive(mesh, link_name=link_name)
 
     scale = params["scale"]
     padding = params["padding"]
     min_size = params["min_size"]
+    scale_kw = dict(
+        scale=scale,
+        scale_x=params.get("scale_x"),
+        scale_y=params.get("scale_y"),
+        scale_z=params.get("scale_z"),
+        padding=padding,
+        padding_x=params.get("padding_x"),
+        padding_y=params.get("padding_y"),
+        padding_z=params.get("padding_z"),
+        min_size=min_size,
+    )
 
     if ptype == "sphere":
         radius, tf = fit_sphere(mesh, scale=scale, padding=padding, min_size=min_size)
-        geom = Sphere(radius=radius)
-        desc = f"sphere r={radius:.4f}"
-        return geom, tf, desc
+        return Sphere(radius=radius), tf, f"sphere r={radius:.4f}"
 
     if ptype == "cylinder":
-        radius, length, tf = fit_cylinder(
-            mesh,
-            scale=scale,
-            scale_x=params.get("scale_x"),
-            scale_y=params.get("scale_y"),
-            scale_z=params.get("scale_z"),
-            padding=padding,
-            padding_x=params.get("padding_x"),
-            padding_y=params.get("padding_y"),
-            padding_z=params.get("padding_z"),
-            min_size=min_size,
-        )
-        geom = Cylinder(radius=radius, length=length)
-        desc = f"cylinder r={radius:.4f} l={length:.4f}"
-        return geom, tf, desc
+        radius, length, tf = fit_cylinder(mesh, **scale_kw)
+        return Cylinder(radius=radius, length=length), tf, f"cylinder r={radius:.4f} l={length:.4f}"
 
     # default: box
     bb_size, tf = calculate_bounding_box(
@@ -209,11 +200,9 @@ def fit_primitive(mesh: trimesh.Trimesh, params: dict):
         padding_y=params.get("padding_y"),
         padding_z=params.get("padding_z"),
         min_size=min_size,
-        tight_fit=params.get("tight_fit", False),
+        tight_fit=params.get("tight_fit", True),
     )
-    geom = Box(bb_size)
-    desc = f"box [{bb_size[0]:.4f}, {bb_size[1]:.4f}, {bb_size[2]:.4f}]"
-    return geom, tf, desc
+    return Box(bb_size), tf, f"box [{bb_size[0]:.4f}, {bb_size[1]:.4f}, {bb_size[2]:.4f}]"
 
 
 def calculate_volume_ratio(mesh: trimesh.Trimesh, bb_size: list[float]) -> float:
@@ -277,7 +266,8 @@ def main():
         help="bounding box type: oriented (obb) or axis-aligned (aabb) (default: obb)",
     )
     parser.add_argument("--min-size", type=float, default=0.001, help="minimum primitive dimension in meters (default: 0.001)")
-    parser.add_argument("--tight-fit", action="store_true", help="use convex hull for tighter fitting")
+    parser.add_argument("--tight-fit", action=argparse.BooleanOptionalAction, default=True,
+                        help="use convex hull for tighter fitting (default: on, use --no-tight-fit to disable)")
     parser.add_argument("-v", "--verbose", action="store_true", help="print detailed per-link information")
 
     args = parser.parse_args()
@@ -288,6 +278,7 @@ def main():
     config = _load_config(args.config)
     urdf_handler = URDFHandler(args.input_urdf, args.exclude)
     filename_dict = urdf_handler.get_filenames(args.select)
+    urdf_dir = str(Path(args.input_urdf).resolve().parent)
 
     # Print configuration summary
     print(f"\n{COLORS.OKBLUE}Configuration:{COLORS.ENDC}")
@@ -313,9 +304,11 @@ def main():
                 resolved_filename = resource_retriever.get_filename(
                     resolved_filename, use_protocol=False,
                 )
+            if not os.path.isabs(resolved_filename):
+                resolved_filename = os.path.join(urdf_dir, resolved_filename)
             mesh = trimesh.load(resolved_filename)
 
-            geom, prim_tf, desc = fit_primitive(mesh, params)
+            geom, prim_tf, desc = fit_primitive(mesh, params, link_name=link)
 
             original_rotation = transforms3d.euler.euler2mat(
                 c.origin.rotation[0], c.origin.rotation[1], c.origin.rotation[2],
