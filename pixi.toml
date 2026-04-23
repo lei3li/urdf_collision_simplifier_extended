@@ -6,7 +6,7 @@ channels = ["conda-forge"]
 platforms = ["linux-64"]
 
 [dependencies]
-python = ">=3.11"
+python = ">=3.11,<3.14"
 
 [pypi-dependencies]
 trimesh = "*"
@@ -16,6 +16,8 @@ scipy = "*"
 lxml = "*"
 pyyaml = "*"
 urdf-parser-py = "*"
+mujoco = "*"
 
 [tasks]
 simplify = { cmd = "python -m simplify_urdf_collision.simplify", env = { PYTHONPATH = "src" } }
+urdf2mjcf = { cmd = "python -m simplify_urdf_collision.urdf2mjcf", env = { PYTHONPATH = "src" } }

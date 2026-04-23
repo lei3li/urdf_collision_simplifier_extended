@@ -139,6 +139,36 @@ pixi run simplify input.urdf output.urdf --config config.yaml --verbose
 4. **For safe collision checking**: larger scaling (1.2-1.5) with generous padding.
 5. **Always use `--verbose`** when iterating to see what primitive and dimensions each link gets.
 
+## Convert URDF to MJCF (MuJoCo)
+
+Once you've simplified a URDF you can compile it to MuJoCo's MJCF XML format
+using the built-in MuJoCo compiler (no external tools needed):
+
+```bash
+pixi run urdf2mjcf input.urdf output.xml --verbose
+# Default output path is <input_stem>.xml next to the URDF:
+pixi run urdf2mjcf my_robot/neura_4ne1_g3_1_no_shells_simplified.urdf
+```
+
+What it does:
+
+1. Injects a `<mujoco><compiler .../></mujoco>` block into the URDF with
+   sensible defaults (`balanceinertia`, `fusestatic`, `discardvisual=false`).
+2. Sanitizes degenerate `<inertial>` blocks (zero or numerically-singular
+   inertia tensors on virtual sensor links) so MuJoCo's inertia-eigenvalue
+   check passes; fixed-joint children get fused into their parent anyway.
+3. Compiles the annotated URDF with `mujoco.MjSpec` and writes the canonical
+   MJCF via `spec.to_xml()`.
+
+Useful options:
+
+| Flag | Description |
+|------|-------------|
+| `--meshdir DIR` | Override `<compiler meshdir=...>` in the output MJCF. |
+| `--copy-meshes` | Copy the `meshes/` tree next to the output MJCF. |
+| `--compiler-option KEY=VALUE` | Add arbitrary `<compiler>` attributes. Repeatable. |
+| `-v`, `--verbose` | Print sanitization and compile stats. |
+
 ## Legacy notes
 
 The repo still contains `CMakeLists.txt`, `package.xml`, `setup.py`, and
